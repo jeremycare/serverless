@@ -4,9 +4,7 @@
 
 const chai = require('chai');
 const overrideEnv = require('process-utils/override-env');
-const spawn = require('child-process-ext/spawn');
 const overrideArgv = require('process-utils/override-argv');
-const resolveAwsEnv = require('@serverless/test/resolve-env');
 const runServerless = require('../../../utils/run-serverless');
 const Serverless = require('../../../../lib/serverless');
 const CLI = require('../../../../lib/classes/cli');
@@ -16,7 +14,7 @@ const ServerlessError = require('../../../../lib/serverless-error');
 const getRequire = require('../../../../lib/utils/get-require');
 
 const path = require('path');
-const fs = require('fs');
+const fsp = require('fs').promises;
 const fse = require('fs-extra');
 const mockRequire = require('mock-require');
 const sinon = require('sinon');
@@ -29,6 +27,122 @@ chai.use(require('chai-as-promised'));
 chai.use(require('sinon-chai'));
 
 const expect = chai.expect;
+
+const fixturesPath = path.resolve(__dirname, '../../../fixtures/programmatic');
+
+class PromisePluginMock {
+  constructor() {
+    this.commands = {
+      deploy: {
+        usage: 'Deploy to the default infrastructure',
+        lifecycleEvents: ['resources', 'functions'],
+        options: {
+          resource: {
+            usage: 'The resource you want to deploy (e.g. --resource db)',
+          },
+          function: {
+            usage: 'The function you want to deploy (e.g. --function create)',
+          },
+        },
+        commands: {
+          onpremises: {
+            usage: 'Deploy to your On-Premises infrastructure',
+            lifecycleEvents: ['resources', 'functions'],
+            options: {
+              resource: {
+                usage: 'The resource you want to deploy (e.g. --resource db)',
+              },
+              function: {
+                usage: 'The function you want to deploy (e.g. --function create)',
+              },
+            },
+          },
+          other: {
+            usage: 'Deploy to other infrastructure',
+            lifecycleEvents: ['resources', 'functions'],
+          },
+        },
+      },
+    };
+
+    this.hooks = {
+      'deploy:functions': this.functions.bind(this),
+      'before:deploy:onpremises:functions': this.resources.bind(this),
+    };
+
+    // used to test if the function was executed correctly
+    this.deployedFunctions = 0;
+    this.deployedResources = 0;
+  }
+
+  functions() {
+    return new BbPromise((resolve) => {
+      this.deployedFunctions += 1;
+      return resolve();
+    });
+  }
+
+  resources() {
+    return new BbPromise((resolve) => {
+      this.deployedResources += 1;
+      return resolve();
+    });
+  }
+}
+
+class SynchronousPluginMock {
+  constructor() {
+    this.commands = {
+      deploy: {
+        usage: 'Deploy to the default infrastructure',
+        lifecycleEvents: ['resources', 'functions'],
+        options: {
+          resource: {
+            usage: 'The resource you want to deploy (e.g. --resource db)',
+            type: 'string',
+          },
+          function: {
+            usage: 'The function you want to deploy (e.g. --function create)',
+            type: 'string',
+          },
+        },
+        commands: {
+          onpremises: {
+            usage: 'Deploy to your On-Premises infrastructure',
+            lifecycleEvents: ['resources', 'functions'],
+            options: {
+              resource: {
+                usage: 'The resource you want to deploy (e.g. --resource db)',
+                type: 'string',
+              },
+              function: {
+                usage: 'The function you want to deploy (e.g. --function create)',
+                type: 'string',
+              },
+            },
+          },
+        },
+      },
+    };
+
+    this.hooks = {
+      'deploy:functions': this.functions.bind(this),
+      'before:deploy:onpremises:functions': this.resources.bind(this),
+    };
+
+    // used to test if the function was executed correctly
+    this.deployedFunctions = 0;
+    this.deployedResources = 0;
+  }
+
+  functions() {
+    this.deployedFunctions += 1;
+  }
+
+  resources() {
+    this.deployedResources += 1;
+  }
+}
 
 describe('PluginManager', () => {
   let pluginManager;
@@ -90,120 +204,6 @@ describe('PluginManager', () => {
 
     functions() {
       this.deployedFunctions += 1;
-    }
-  }
-
-  class PromisePluginMock {
-    constructor() {
-      this.commands = {
-        deploy: {
-          usage: 'Deploy to the default infrastructure',
-          lifecycleEvents: ['resources', 'functions'],
-          options: {
-            resource: {
-              usage: 'The resource you want to deploy (e.g. --resource db)',
-            },
-            function: {
-              usage: 'The function you want to deploy (e.g. --function create)',
-            },
-          },
-          commands: {
-            onpremises: {
-              usage: 'Deploy to your On-Premises infrastructure',
-              lifecycleEvents: ['resources', 'functions'],
-              options: {
-                resource: {
-                  usage: 'The resource you want to deploy (e.g. --resource db)',
-                },
-                function: {
-                  usage: 'The function you want to deploy (e.g. --function create)',
-                },
-              },
-            },
-            other: {
-              usage: 'Deploy to other infrastructure',
-              lifecycleEvents: ['resources', 'functions'],
-            },
-          },
-        },
-      };
-
-      this.hooks = {
-        'deploy:functions': this.functions.bind(this),
-        'before:deploy:onpremises:functions': this.resources.bind(this),
-      };
-
-      // used to test if the function was executed correctly
-      this.deployedFunctions = 0;
-      this.deployedResources = 0;
-    }
-
-    functions() {
-      return new BbPromise((resolve) => {
-        this.deployedFunctions += 1;
-        return resolve();
-      });
-    }
-
-    resources() {
-      return new BbPromise((resolve) => {
-        this.deployedResources += 1;
-        return resolve();
-      });
-    }
-  }
-
-  class SynchronousPluginMock {
-    constructor() {
-      this.commands = {
-        deploy: {
-          usage: 'Deploy to the default infrastructure',
-          lifecycleEvents: ['resources', 'functions'],
-          options: {
-            resource: {
-              usage: 'The resource you want to deploy (e.g. --resource db)',
-              type: 'string',
-            },
-            function: {
-              usage: 'The function you want to deploy (e.g. --function create)',
-              type: 'string',
-            },
-          },
-          commands: {
-            onpremises: {
-              usage: 'Deploy to your On-Premises infrastructure',
-              lifecycleEvents: ['resources', 'functions'],
-              options: {
-                resource: {
-                  usage: 'The resource you want to deploy (e.g. --resource db)',
-                  type: 'string',
-                },
-                function: {
-                  usage: 'The function you want to deploy (e.g. --function create)',
-                  type: 'string',
-                },
-              },
-            },
-          },
-        },
-      };
-
-      this.hooks = {
-        'deploy:functions': this.functions.bind(this),
-        'before:deploy:onpremises:functions': this.resources.bind(this),
-      };
-
-      // used to test if the function was executed correctly
-      this.deployedFunctions = 0;
-      this.deployedResources = 0;
-    }
-
-    functions() {
-      this.deployedFunctions += 1;
-    }
-
-    resources() {
-      this.deployedResources += 1;
     }
   }
 
@@ -1560,70 +1560,6 @@ describe('PluginManager', () => {
       }
     });
   });
-
-  describe('Plugin / CLI integration', function () {
-    this.timeout(1000 * 60 * 10);
-
-    let serverlessInstance;
-    let env;
-    const serverlessExec = require('../../../serverless-binary');
-
-    before(() => {
-      env = resolveAwsEnv();
-    });
-
-    beforeEach(() => {
-      serverlessInstance = new Serverless({ commands: ['print'], options: {}, serviceDir: null });
-      return serverlessInstance.init().then(() => {
-        // Cannot rely on shebang in severless.js to invoke script using NodeJS on Windows.
-        const tmpDir = getTmpDirPath();
-        serviceDir = path.join(tmpDir, 'service');
-        fse.mkdirsSync(serviceDir);
-
-        return spawn(serverlessExec, ['create', '--template', 'aws-nodejs'], {
-          env,
-          cwd: serviceDir,
-        });
-      });
-    });
-
-    it('should expose a working integration between the CLI and the plugin system', () => {
-      expect(
-        serverlessInstance.utils.fileExistsSync(path.join(serviceDir, 'serverless.yml'))
-      ).to.equal(true);
-      expect(serverlessInstance.utils.fileExistsSync(path.join(serviceDir, 'handler.js'))).to.equal(
-        true
-      );
-    });
-
-    it('should load plugins relatively to the working directory', () => {
-      const localPluginDir = path.join(serviceDir, 'node_modules', 'local-plugin');
-      const parentPluginDir = path.join(serviceDir, '..', 'node_modules', 'parent-plugin');
-      installPlugin(localPluginDir, SynchronousPluginMock);
-      installPlugin(parentPluginDir, PromisePluginMock);
-
-      fs.appendFileSync(
-        path.join(serviceDir, 'serverless.yml'),
-        'plugins:\n  - local-plugin\n  - parent-plugin'
-      );
-
-      return spawn(serverlessExec, ['--help'], { env, cwd: serviceDir }).then(
-        ({ stdoutBuffer }) => {
-          const stringifiedOutput = String(stdoutBuffer);
-          expect(stringifiedOutput).to.contain('SynchronousPluginMock');
-          expect(stringifiedOutput).to.contain('PromisePluginMock');
-        }
-      );
-    });
-
-    afterEach(() => {
-      try {
-        fse.removeSync(serviceDir);
-      } catch (e) {
-        // Couldn't delete temporary file
-      }
-    });
-  });
 });
 
 describe('test/unit/lib/classes/PluginManager.test.js', () => {
@@ -1650,5 +1586,39 @@ describe('test/unit/lib/classes/PluginManager.test.js', () => {
         },
       })
     ).to.be.eventually.rejected.and.have.property('code', 'DUPLICATE_PLUGIN_DEFINITION');
+  });
+
+  it('should load plugins relatively to the working directory', async () => {
+    const baseTmpDir = getTmpDirPath();
+    const serviceDir = path.join(baseTmpDir, 'servicedir');
+    await runServerless({
+      noService: true,
+      command: 'create',
+      options: {
+        'template-path': path.join(fixturesPath, 'aws'),
+        'path': serviceDir,
+      },
+    });
+
+    const localPluginDir = path.join(serviceDir, 'node_modules', 'local-plugin');
+    const parentPluginDir = path.join(serviceDir, '..', 'node_modules', 'parent-plugin');
+    installPlugin(localPluginDir, SynchronousPluginMock);
+    installPlugin(parentPluginDir, PromisePluginMock);
+
+    await fsp.appendFile(
+      path.join(serviceDir, 'serverless.yml'),
+      'plugins:\n  - local-plugin\n  - parent-plugin'
+    );
+
+    const result = await runServerless({
+      cwd: serviceDir,
+      command: 'print',
+    });
+
+    const pluginNames = new Set(
+      result.serverless.pluginManager.plugins.map((plugin) => plugin.constructor.name)
+    );
+    expect(pluginNames).to.contain('SynchronousPluginMock');
+    expect(pluginNames).to.contain('PromisePluginMock');
   });
 });
